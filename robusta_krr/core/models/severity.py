@@ -121,6 +121,7 @@ def memory_severity_calculator(
 
     diff = abs(current - recommended) / 1024 / 1024
 
+    # If current memory is set lower than recommended memory set as GOOD
     if current < recommended:
         return Severity.GOOD
 
