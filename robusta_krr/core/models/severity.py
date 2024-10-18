@@ -97,6 +97,9 @@ def cpu_severity_calculator(
 
     diff = abs(current - recommended)
 
+    if current < recommended:
+        return Severity.GOOD
+
     if diff >= 0.5:
         return Severity.CRITICAL
     elif diff >= 0.25:
@@ -117,6 +120,9 @@ def memory_severity_calculator(
         return Severity.WARNING
 
     diff = abs(current - recommended) / 1024 / 1024
+
+    if current < recommended:
+        return Severity.GOOD
 
     if diff >= 500:
         return Severity.CRITICAL
