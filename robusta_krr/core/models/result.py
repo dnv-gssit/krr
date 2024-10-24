@@ -100,7 +100,7 @@ class Result(pd.BaseModel):
         # If no workloads are marked as warnings or critical, score will be 100
         # Scans are neither warning nor critical, returns score of 0
         if self.scans:
-            return 100 - int(score / len(self.scans)) * 100
+            return 100 - int((score / len(self.scans)) * 100)
         else:
             return 100
 
