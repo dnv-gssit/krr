@@ -98,6 +98,7 @@ class Result(pd.BaseModel):
 
         score = sum(self.__scan_cost(scan) for scan in self.scans)
         # If no workloads are marked as warnings or critical, score will be 100
+        # Scans are neither warning nor critical, returns score of 0
         return 100 - int((len(self.scans) - score) / len(self.scans) * 100) if self.scans else 100
 
     @property
