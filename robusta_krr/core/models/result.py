@@ -97,7 +97,8 @@ class Result(pd.BaseModel):
         """
 
         score = sum(self.__scan_cost(scan) for scan in self.scans)
-        return int((len(self.scans) - score) / len(self.scans) * 100) if self.scans else 0
+        # If no workloads are marked as warnings or critical, score will be 100
+        return 100 - int((len(self.scans) - score) / len(self.scans) * 100) if self.scans else 100
 
     @property
     def score_letter(self) -> str:
