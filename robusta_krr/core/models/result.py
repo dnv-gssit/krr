@@ -87,7 +87,17 @@ class Result(pd.BaseModel):
 
     @staticmethod
     def __scan_cost(scan: ResourceScan) -> float:
-        return 0.7 if scan.severity == Severity.WARNING else 1 if scan.severity == Severity.CRITICAL else 0
+
+        if scan.severity == Severity.CRITICAL:
+            return -0.7
+        elif scan.severity == Severity.WARNING:
+            return -0.5
+        elif scan.severity == Severity.OK:
+            return 0.3
+        elif scan.severity == Severity.GOOD:
+            return 0.3
+        else:
+            return 0
 
     def __calculate_score(self) -> int:
         """Get the score of the result.
@@ -99,10 +109,8 @@ class Result(pd.BaseModel):
         score = sum(self.__scan_cost(scan) for scan in self.scans)
         # If no workloads are marked as warnings or critical, score will be 100
         # Scans are neither warning nor critical, returns score of 0
-        if self.scans:
-            return int(100 - (score / len(self.scans) * 100))
-        else:
-            return 100
+        normalized_score = max(0, min(100, 50 + (score / len(self.scans) * 50))) if self.scans else 100
+        return int(normalized_score)
 
     @property
     def score_letter(self) -> str:
