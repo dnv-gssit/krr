@@ -89,9 +89,9 @@ class Result(pd.BaseModel):
     def __scan_cost(scan: ResourceScan) -> float:
 
         if scan.severity == Severity.CRITICAL:
-            return -1
+            return -0.5
         elif scan.severity == Severity.WARNING:
-            return -0.7
+            return -0.3
         elif scan.severity == Severity.OK:
             return 0.5
         elif scan.severity == Severity.GOOD:
