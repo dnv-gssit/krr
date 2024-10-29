@@ -96,6 +96,8 @@ class Result(pd.BaseModel):
             return 0.8
         elif scan.severity == Severity.GOOD:
             return 1
+        elif scan.severity == Severity.IGNORED:
+            return 0
         else:
             return 0
 
