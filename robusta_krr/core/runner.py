@@ -264,6 +264,7 @@ class Runner:
                 limits={resource: recommendation[resource].limit for resource in ResourceType},
                 info={resource: recommendation[resource].info for resource in ResourceType},
             ),
+            selector="",
         )
 
     async def _collect_result(self) -> Result:

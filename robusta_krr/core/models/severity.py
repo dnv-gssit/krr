@@ -19,6 +19,7 @@ class Severity(str, enum.Enum):
     OK = "OK"
     WARNING = "WARNING"
     CRITICAL = "CRITICAL"
+    IGNORE   = "IGNORE"
 
     @property
     def color(self) -> str:
@@ -28,16 +29,17 @@ class Severity(str, enum.Enum):
             self.OK: "gray",
             self.WARNING: "yellow",
             self.CRITICAL: "red",
+            self.IGNORE: "grey",
         }[self]
 
     @classmethod
     def calculate(
-        cls, current: RecommendationValue, recommended: RecommendationValue, resource_type: ResourceType
+        cls, current: RecommendationValue, recommended: RecommendationValue, resource_type: ResourceType, selector: str,
     ) -> Severity:
         if isinstance(recommended, str) or isinstance(current, str):
             return cls.UNKNOWN
 
-        return calculate_severity(current, recommended, resource_type)
+        return calculate_severity(current, recommended, resource_type, selector)
 
 
 def register_severity_calculator(resource_type: ResourceType) -> Callable[[SeverityCalculator], SeverityCalculator]:
@@ -67,7 +69,7 @@ SeverityCalculator = Callable[[Optional[float], Optional[float], ResourceType], 
 SEVERITY_CALCULATORS_REGISTRY: dict[ResourceType, SeverityCalculator] = {}
 
 
-def calculate_severity(current: Optional[float], recommended: Optional[float], resource_type: ResourceType) -> Severity:
+def calculate_severity(current: Optional[float], recommended: Optional[float], resource_type: ResourceType, selector: str) -> Severity:
     """
     Calculate the severity of the scan based on the current value and the recommended value.
 
@@ -76,7 +78,7 @@ def calculate_severity(current: Optional[float], recommended: Optional[float], r
     """
 
     return SEVERITY_CALCULATORS_REGISTRY.get(resource_type, default_severity_calculator)(
-        current, recommended, resource_type
+        current, recommended, resource_type, selector
     )
 
 
@@ -88,48 +90,56 @@ def default_severity_calculator(
 
 @register_severity_calculator(ResourceType.CPU)
 def cpu_severity_calculator(
-    current: Optional[float], recommended: Optional[float], resource_type: ResourceType
+    current: Optional[float], recommended: Optional[float], resource_type: ResourceType, selector: str
 ) -> Severity:
-    if current is None and recommended is None:
-        return Severity.GOOD
-    if current is None or recommended is None:
-        return Severity.WARNING
 
-    diff = abs(current - recommended)
-
-    if current < recommended:
-        return Severity.GOOD
-
-    if diff >= 0.5:
-        return Severity.CRITICAL
-    elif diff >= 0.25:
-        return Severity.WARNING
-    elif diff >= 0.1:
-        return Severity.OK
+    if selector == 'limits':
+        return Severity.IGNORE
     else:
-        return Severity.GOOD
+        if current is None and recommended is None:
+            return Severity.GOOD
+        if current is None or recommended is None:
+            return Severity.WARNING
+
+        diff = abs(current - recommended)
+
+        if current < recommended:
+            return Severity.GOOD
+
+        if diff >= 0.5:
+            return Severity.CRITICAL
+        elif diff >= 0.25:
+            return Severity.WARNING
+        elif diff >= 0.1:
+            return Severity.OK
+        else:
+            return Severity.GOOD
 
 
 @register_severity_calculator(ResourceType.Memory)
 def memory_severity_calculator(
-    current: Optional[float], recommended: Optional[float], resource_type: ResourceType
+    current: Optional[float], recommended: Optional[float], resource_type: ResourceType, selector: str
 ) -> Severity:
-    if current is None and recommended is None:
-        return Severity.GOOD
-    if current is None or recommended is None:
-        return Severity.WARNING
 
-    diff = abs(current - recommended) / 1024 / 1024
-
-    # If current memory is set lower than recommended memory set as GOOD
-    if current < recommended:
-        return Severity.GOOD
-
-    if diff >= 500:
-        return Severity.CRITICAL
-    elif diff >= 250:
-        return Severity.WARNING
-    elif diff >= 100:
-        return Severity.OK
+    if selector == 'limits':
+        return Severity.IGNORE
     else:
-        return Severity.GOOD
+        if current is None and recommended is None:
+            return Severity.GOOD
+        if current is None or recommended is None:
+            return Severity.WARNING
+
+        diff = abs(current - recommended) / 1024 / 1024
+
+        # If current memory is set lower than recommended memory set as GOOD
+        if current < recommended:
+            return Severity.GOOD
+
+        if diff >= 500:
+            return Severity.CRITICAL
+        elif diff >= 250:
+            return Severity.WARNING
+        elif diff >= 100:
+            return Severity.OK
+        else:
+            return Severity.GOOD

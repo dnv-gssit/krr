@@ -28,7 +28,7 @@ class ResourceScan(pd.BaseModel):
     severity: Severity
 
     @classmethod
-    def calculate(cls, object: K8sObjectData, recommendation: ResourceAllocations) -> ResourceScan:
+    def calculate(cls, object: K8sObjectData, recommendation: ResourceAllocations, selector: str) -> ResourceScan:
         recommendation_processed = ResourceRecommendation(requests={}, limits={}, info={})
 
         for resource_type in ResourceType:
@@ -38,7 +38,7 @@ class ResourceScan(pd.BaseModel):
                 current = getattr(object.allocations, selector).get(resource_type)
                 recommended = getattr(recommendation, selector).get(resource_type)
 
-                current_severity = Severity.calculate(current, recommended, resource_type)
+                current_severity = Severity.calculate(current, recommended, resource_type, selector)
 
                 getattr(recommendation_processed, selector)[resource_type] = Recommendation(
                     value=recommended, severity=current_severity
