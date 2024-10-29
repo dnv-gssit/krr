@@ -26,7 +26,7 @@ class ResourceScan(pd.BaseModel):
     object: K8sObjectData
     recommended: ResourceRecommendation
     severity: Severity
-
+    selector: str
     @classmethod
     def calculate(cls, object: K8sObjectData, recommendation: ResourceAllocations, selector: str) -> ResourceScan:
         recommendation_processed = ResourceRecommendation(requests={}, limits={}, info={})
@@ -48,7 +48,7 @@ class ResourceScan(pd.BaseModel):
             for selector in ["requests", "limits"]:
                 for recommendation_request in getattr(recommendation_processed, selector).values():
                     if recommendation_request.severity == severity:
-                        return cls(object=object, recommended=recommendation_processed, severity=severity)
+                        return cls(object=object, recommended=recommendation_processed, severity=severity, selector=selector)
 
         return cls(object=object, recommended=recommendation_processed, severity=Severity.UNKNOWN)
 
@@ -87,17 +87,17 @@ class Result(pd.BaseModel):
 
     @staticmethod
     def __scan_cost(scan: ResourceScan) -> float:
+        scan.selector
 
-        if scan.severity == Severity.CRITICAL:
+
+        if scan.severity == Severity.CRITICAL and scan.selector == "requests":
             return 0.3
-        elif scan.severity == Severity.WARNING:
+        elif scan.severity == Severity.WARNING and scan.selector == "requests":
             return 0.5
-        elif scan.severity == Severity.OK:
+        elif scan.severity == Severity.OK and scan.selector == "requests":
             return 0.8
         elif scan.severity == Severity.GOOD:
             return 1
-        elif scan.severity == Severity.IGNORE:
-            return 0
         else:
             return 0
 
