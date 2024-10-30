@@ -26,9 +26,8 @@ class ResourceScan(pd.BaseModel):
     object: K8sObjectData
     recommended: ResourceRecommendation
     severity: Severity
-    selector: str
     @classmethod
-    def calculate(cls, object: K8sObjectData, recommendation: ResourceAllocations, selector: str) -> ResourceScan:
+    def calculate(cls, object: K8sObjectData, recommendation: ResourceAllocations) -> ResourceScan:
         recommendation_processed = ResourceRecommendation(requests={}, limits={}, info={})
 
         for resource_type in ResourceType:
@@ -38,7 +37,7 @@ class ResourceScan(pd.BaseModel):
                 current = getattr(object.allocations, selector).get(resource_type)
                 recommended = getattr(recommendation, selector).get(resource_type)
 
-                current_severity = Severity.calculate(current, recommended, resource_type, selector)
+                current_severity = Severity.calculate(current, recommended, resource_type)
 
                 getattr(recommendation_processed, selector)[resource_type] = Recommendation(
                     value=recommended, severity=current_severity
@@ -48,7 +47,7 @@ class ResourceScan(pd.BaseModel):
             for selector in ["requests", "limits"]:
                 for recommendation_request in getattr(recommendation_processed, selector).values():
                     if recommendation_request.severity == severity:
-                        return cls(object=object, recommended=recommendation_processed, severity=severity, selector=selector)
+                        return cls(object=object, recommended=recommendation_processed, severity=severity)
 
         return cls(object=object, recommended=recommendation_processed, severity=Severity.UNKNOWN)
 
@@ -87,17 +86,16 @@ class Result(pd.BaseModel):
 
     @staticmethod
     def __scan_cost(scan: ResourceScan) -> float:
-        scan.selector
 
-
-        if scan.severity == Severity.CRITICAL and scan.selector == "requests":
+        severity = scan.recommended.requests[ResourceType.Memory].severity
+        if severity == Severity.CRITICAL:
+            return 1.0
+        elif severity == Severity.WARNING:
+            return 0.7
+        elif severity == Severity.OK:
             return 0.3
-        elif scan.severity == Severity.WARNING and scan.selector == "requests":
-            return 0.5
-        elif scan.severity == Severity.OK and scan.selector == "requests":
-            return 0.8
-        elif scan.severity == Severity.GOOD:
-            return 1
+        elif severity == Severity.GOOD:
+            return 0.0
         else:
             return 0
 
@@ -107,12 +105,12 @@ class Result(pd.BaseModel):
         Returns:
             The score of the result.
         """
-
         score = sum(self.__scan_cost(scan) for scan in self.scans)
-        # If no workloads are marked as warnings or critical, score will be 100
-        # Scans are neither warning nor critical, returns score of 0
-        normalized_score = max(0, min(100, 50 + (score / len(self.scans) * 50))) if self.scans else 100
-        return int(normalized_score)
+        if self.scans:
+            normalized_score =  100 - (score / len(self.scans)) * 100
+            return int(normalized_score)
+        else:
+            return 100
 
     @property
     def score_letter(self) -> str:

@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "type": "debugpy",
+            "request": "launch",
+            "name": "Launch KRR",
+            "program": "${workspaceFolder}/krr.py",
+            "args": ["simple", "-p", "http://localhost:9090", "-n", "ecosystem-dev", "-n", "coe-dev", "-n", "license-dev", "-n", "gtr-dev","-n", "rapid-dev", "-n", "customerportal-dev", "-n", "coe-sampleapp-dev", "--allow-hpa","-r", "deployment", "-r", "statefulset", "-r", "daemonset", "-r", "rollout", "-f", "json"],
+            "console": "integratedTerminal"
+        }
+    ],
+    "inputs": [
+        {
+            "type": "promptString",
+            "id": "programPath",
+            "description": "Enter the path to the Python program to launch"
+        }
+    ]
+}

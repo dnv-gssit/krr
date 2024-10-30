@@ -31,12 +31,12 @@ class Severity(str, enum.Enum):
 
     @classmethod
     def calculate(
-        cls, current: RecommendationValue, recommended: RecommendationValue, resource_type: ResourceType, selector: str,
+        cls, current: RecommendationValue, recommended: RecommendationValue, resource_type: ResourceType,
     ) -> Severity:
         if isinstance(recommended, str) or isinstance(current, str):
-            return cls.UNKNOWN
+            return cls.UNKNOWNs
 
-        return calculate_severity(current, recommended, resource_type, selector)
+        return calculate_severity(current, recommended, resource_type)
 
 
 def register_severity_calculator(resource_type: ResourceType) -> Callable[[SeverityCalculator], SeverityCalculator]:
@@ -66,7 +66,7 @@ SeverityCalculator = Callable[[Optional[float], Optional[float], ResourceType], 
 SEVERITY_CALCULATORS_REGISTRY: dict[ResourceType, SeverityCalculator] = {}
 
 
-def calculate_severity(current: Optional[float], recommended: Optional[float], resource_type: ResourceType, selector: str) -> Severity:
+def calculate_severity(current: Optional[float], recommended: Optional[float], resource_type: ResourceType) -> Severity:
     """
     Calculate the severity of the scan based on the current value and the recommended value.
 
@@ -75,7 +75,7 @@ def calculate_severity(current: Optional[float], recommended: Optional[float], r
     """
 
     return SEVERITY_CALCULATORS_REGISTRY.get(resource_type, default_severity_calculator)(
-        current, recommended, resource_type, selector
+        current, recommended, resource_type
     )
 
 
@@ -87,7 +87,7 @@ def default_severity_calculator(
 
 @register_severity_calculator(ResourceType.CPU)
 def cpu_severity_calculator(
-    current: Optional[float], recommended: Optional[float], resource_type: ResourceType, selector: str
+    current: Optional[float], recommended: Optional[float], resource_type: ResourceType
 ) -> Severity:
 
     if current is None and recommended is None:
@@ -112,7 +112,7 @@ def cpu_severity_calculator(
 
 @register_severity_calculator(ResourceType.Memory)
 def memory_severity_calculator(
-    current: Optional[float], recommended: Optional[float], resource_type: ResourceType, selector: str
+    current: Optional[float], recommended: Optional[float], resource_type: ResourceType
 ) -> Severity:
 
     if current is None and recommended is None:
