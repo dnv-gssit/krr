@@ -34,7 +34,7 @@ class Severity(str, enum.Enum):
         cls, current: RecommendationValue, recommended: RecommendationValue, resource_type: ResourceType,
     ) -> Severity:
         if isinstance(recommended, str) or isinstance(current, str):
-            return cls.UNKNOWNs
+            return cls.UNKNOWN
 
         return calculate_severity(current, recommended, resource_type)
 
