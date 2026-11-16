@@ -17,8 +17,8 @@ class Recommendation(pd.BaseModel):
 
 
 class ResourceRecommendation(pd.BaseModel):
-    requests: dict[ResourceType, RecommendationValue]
-    limits: dict[ResourceType, RecommendationValue]
+    requests: dict[ResourceType, Union[RecommendationValue, Recommendation]]
+    limits: dict[ResourceType, Union[RecommendationValue, Recommendation]]
     info: dict[ResourceType, Optional[str]]
 
 
@@ -39,6 +39,7 @@ class ResourceScan(pd.BaseModel):
 
                 current_severity = Severity.calculate(current, recommended, resource_type)
 
+                # TODO: consider... changing field after model created doesn't validate it.
                 getattr(recommendation_processed, selector)[resource_type] = Recommendation(
                     value=recommended, severity=current_severity
                 )
@@ -117,11 +118,5 @@ class Result(pd.BaseModel):
         return (
             "F"
             if self.score < 30
-            else "D"
-            if self.score < 55
-            else "C"
-            if self.score < 70
-            else "B"
-            if self.score < 90
-            else "A"
+            else "D" if self.score < 55 else "C" if self.score < 70 else "B" if self.score < 90 else "A"
         )

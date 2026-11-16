@@ -1,8 +1,9 @@
 import asyncio
 import logging
+import re
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Awaitable, Callable, Iterable, Optional, Union
+from typing import Any, Awaitable, Callable, Iterable, Optional, Union, Literal
 
 from kubernetes import client, config  # type: ignore
 from kubernetes.client import ApiException
@@ -22,6 +23,15 @@ from robusta_krr.core.models.objects import HPAData, K8sObjectData, KindLiteral,
 from robusta_krr.core.models.result import ResourceAllocations
 from robusta_krr.utils.object_like_dict import ObjectLikeDict
 
+
+class LightweightJobInfo:
+    """Lightweight job object containing only the fields needed for GroupedJob processing."""
+
+    def __init__(self, name: str, namespace: str):
+        self.name = name
+        self.namespace = namespace
+
+
 from . import config_patch as _
 
 logger = logging.getLogger("krr")
@@ -31,7 +41,7 @@ HPAKey = tuple[str, str, str]
 
 
 class ClusterLoader:
-    def __init__(self, cluster: Optional[str]=None):
+    def __init__(self, cluster: Optional[str] = None):
         self.cluster = cluster
         # This executor will be running requests to Kubernetes API
         self.executor = ThreadPoolExecutor(settings.max_workers)
@@ -47,6 +57,43 @@ class ClusterLoader:
 
         self.__jobs_for_cronjobs: dict[str, list[V1Job]] = {}
         self.__jobs_loading_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self.__namespaces: Union[list[str, None]] = None
+
+    @property
+    def namespaces(self) -> Union[list[str], Literal["*"]]:
+        """wrapper for settings.namespaces, which will do expand namespace list if some regex pattern included
+
+        Returns:
+            A list of namespace that will be scanned
+        """
+        # just return the list if it's already initialized
+        if self.__namespaces != None:
+            return self.__namespaces
+
+        setting_ns = settings.namespaces
+        if setting_ns == "*":
+            self.__namespaces = setting_ns
+            return self.__namespaces
+
+        self.__namespaces = []
+        expand_list: list[re.Pattern] = []
+        ns_regex_chars = re.compile(r"[\\*|\(.*?\)|\[.*?\]|\^|\$]")
+        for ns in setting_ns:
+            if ns_regex_chars.search(ns):
+                logger.debug(f"{ns} is detected as regex pattern in expanding namespace list")
+                expand_list.append(re.compile(ns))
+            else:
+                self.__namespaces.append(ns)
+
+        if expand_list:
+            logger.info("found regex pattern in provided namespace argument, expanding namespace list")
+            all_ns = [ns.metadata.name for ns in self.core.list_namespace().items]
+            for expand_ns in expand_list:
+                for ns in all_ns:
+                    if expand_ns.fullmatch(ns) and ns not in self.__namespaces:
+                        self.__namespaces.append(ns)
+
+        return self.__namespaces
 
     async def list_scannable_objects(self) -> list[K8sObjectData]:
         """List all scannable objects.
@@ -56,18 +103,20 @@ class ClusterLoader:
         """
 
         logger.info(f"Listing scannable objects in {self.cluster}")
-        logger.debug(f"Namespaces: {settings.namespaces}")
+        logger.debug(f"Namespaces: {self.namespaces}")
         logger.debug(f"Resources: {settings.resources}")
 
         self.__hpa_list = await self._try_list_hpa()
         workload_object_lists = await asyncio.gather(
             self._list_deployments(),
             self._list_rollouts(),
+            self._list_strimzipodsets(),
             self._list_deploymentconfig(),
             self._list_all_statefulsets(),
             self._list_all_daemon_set(),
             self._list_all_jobs(),
             self._list_all_cronjobs(),
+            self._list_all_groupedjobs(),
         )
 
         return [
@@ -75,7 +124,7 @@ class ClusterLoader:
             for workload_objects in workload_object_lists
             for object in workload_objects
             # NOTE: By default we will filter out kube-system namespace
-            if not (settings.namespaces == "*" and object.namespace == "kube-system")
+            if not (self.namespaces == "*" and object.namespace == "kube-system")
         ]
 
     async def _list_jobs_for_cronjobs(self, namespace: str) -> list[V1Job]:
@@ -106,6 +155,22 @@ class ClusterLoader:
                 )
             ]
             selector = f"batch.kubernetes.io/controller-uid in ({','.join(ownered_jobs_uids)})"
+
+        elif object.kind == "GroupedJob":
+            if not hasattr(object._api_resource, "_label_filter") or not object._api_resource._label_filter:
+                return []
+
+            # Use the label+value filter to get pods
+            ret: V1PodList = await loop.run_in_executor(
+                self.executor,
+                lambda: self.core.list_namespaced_pod(
+                    namespace=object.namespace, label_selector=object._api_resource._label_filter
+                ),
+            )
+
+            # Apply the job grouping limit to pod results
+            limited_pods = ret.items[: settings.job_grouping_limit]
+            return [PodData(name=pod.metadata.name, deleted=False) for pod in limited_pods]
 
         else:
             if object.selector is None:
@@ -146,6 +211,16 @@ class ClusterLoader:
                 ClusterLoader._get_match_expression_filter(expression) for expression in selector.match_expressions
             ]
 
+        # normally the kubernetes API client renames matchLabels to match_labels in python
+        # but for CRDs like ArgoRollouts that renaming doesn't happen and we have selector={'matchLabels': {'app': 'test-app'}}
+        if getattr(selector, "matchLabels", None):
+            label_filters += [f"{label[0]}={label[1]}" for label in getattr(selector, "matchLabels").items()]
+        if getattr(selector, "matchExpressions", None):
+            label_filters += [
+                ClusterLoader._get_match_expression_filter(expression)
+                for expression in getattr(selector, "matchExpressions").items()
+            ]
+
         if label_filters == []:
             # NOTE: This might mean that we have DeploymentConfig,
             # which uses ReplicationController and it has a dict like matchLabels
@@ -163,6 +238,20 @@ class ClusterLoader:
         namespace = item.metadata.namespace
         kind = kind or item.__class__.__name__[2:]
 
+        labels = {}
+        annotations = {}
+        if item.metadata.labels:
+            if type(item.metadata.labels) is ObjectLikeDict:
+                labels = item.metadata.labels.__dict__
+            else:
+                labels = item.metadata.labels
+
+        if item.metadata.annotations:
+            if type(item.metadata.annotations) is ObjectLikeDict:
+                annotations = item.metadata.annotations.__dict__
+            else:
+                annotations = item.metadata.annotations
+
         obj = K8sObjectData(
             cluster=self.cluster,
             namespace=namespace,
@@ -171,6 +260,8 @@ class ClusterLoader:
             container=container.name,
             allocations=ResourceAllocations.from_container(container),
             hpa=self.__hpa_list.get((namespace, kind, name)),
+            labels=labels,
+            annotations=annotations,
         )
         obj._api_resource = item
         return obj
@@ -180,16 +271,87 @@ class ClusterLoader:
             return True
         return resource in settings.resources
 
-    async def _list_namespaced_or_global_objects(
+    def _is_job_owned_by_cronjob(self, job: V1Job) -> bool:
+        """Check if a job is owned by a CronJob."""
+        return any(owner.kind == "CronJob" for owner in job.metadata.owner_references or [])
+
+    def _is_job_grouped(self, job: V1Job) -> bool:
+        """Check if a job has any of the grouping labels."""
+        if not settings.job_grouping_labels or not job.metadata.labels:
+            return False
+        return any(label in job.metadata.labels for label in settings.job_grouping_labels)
+
+    async def _list_namespaced_or_global_objects_batched(
         self,
         kind: KindLiteral,
         all_namespaces_request: Callable,
-        namespaced_request: Callable
+        namespaced_request: Callable,
+        namespace: str,
+        limit: Optional[int] = None,
+        continue_ref: Optional[str] = None,
+    ) -> tuple[list[Any], Optional[str]]:
+        logger.debug("Listing %s in %s with batching (limit=%d)", kind, self.cluster, limit)
+        loop = asyncio.get_running_loop()
+
+        try:
+            if namespace == "*":
+                requests = [
+                    loop.run_in_executor(
+                        self.executor,
+                        lambda: all_namespaces_request(
+                            watch=False,
+                            label_selector=settings.selector,
+                            limit=limit,
+                            _continue=continue_ref,
+                        ),
+                    )
+                ]
+            else:
+                requests = [
+                    loop.run_in_executor(
+                        self.executor,
+                        lambda: namespaced_request(
+                            namespace=namespace,
+                            watch=False,
+                            label_selector=settings.selector,
+                            limit=limit,
+                            _continue=continue_ref,
+                        ),
+                    )
+                ]
+
+            gathered_results = await asyncio.gather(*requests)
+
+            result = [item for request_result in gathered_results for item in request_result.items]
+
+            next_continue_ref = None
+            if gathered_results:
+                next_continue_ref = getattr(gathered_results[0].metadata, "_continue", None)
+
+            return result, next_continue_ref
+
+        except ApiException as e:
+            if e.status == 410 and e.body:
+                # Continue token expired
+                import json
+
+                try:
+                    error_body = json.loads(e.body)
+                    new_continue_token = error_body.get("metadata", {}).get("continue")
+                    if new_continue_token:
+                        logger.info("Continue token expired for jobs listing. Continuing")
+                        return [], new_continue_token
+                except (json.JSONDecodeError, KeyError):
+                    pass
+            raise
+
+    async def _list_namespaced_or_global_objects(
+        self, kind: KindLiteral, all_namespaces_request: Callable, namespaced_request: Callable
     ) -> list[Any]:
         logger.debug(f"Listing {kind}s in {self.cluster}")
         loop = asyncio.get_running_loop()
 
-        if settings.namespaces == "*":
+        if self.namespaces == "*":
             requests = [
                 loop.run_in_executor(
                     self.executor,
@@ -209,14 +371,10 @@ class ClusterLoader:
                         label_selector=settings.selector,
                     ),
                 )
-                for namespace in settings.namespaces
+                for namespace in self.namespaces
             ]
 
-        result = [
-            item
-            for request_result in await asyncio.gather(*requests)
-            for item in request_result.items
-        ]
+        result = [item for request_result in await asyncio.gather(*requests) for item in request_result.items]
 
         logger.debug(f"Found {len(result)} {kind} in {self.cluster}")
         return result
@@ -235,7 +393,7 @@ class ClusterLoader:
 
         if not self.__kind_available[kind]:
             return []
-        
+
         result = []
         try:
             for item in await self._list_namespaced_or_global_objects(kind, all_namespaces_request, namespaced_request):
@@ -248,7 +406,7 @@ class ClusterLoader:
 
                 result.extend(self.__build_scannable_object(item, container, kind) for container in containers)
         except ApiException as e:
-            if kind in ("Rollout", "DeploymentConfig") and e.status in [400, 401, 403, 404]:
+            if kind in ("Rollout", "DeploymentConfig", "StrimziPodSet") and e.status in [400, 401, 403, 404]:
                 if self.__kind_available[kind]:
                     logger.debug(f"{kind} API not available in {self.cluster}")
                 self.__kind_available[kind] = False
@@ -313,6 +471,30 @@ class ClusterLoader:
             extract_containers=_extract_containers,
         )
 
+    def _list_strimzipodsets(self) -> list[K8sObjectData]:
+        # NOTE: Using custom objects API returns dicts, but all other APIs return objects
+        # We need to handle this difference using a small wrapper
+        return self._list_scannable_objects(
+            kind="StrimziPodSet",
+            all_namespaces_request=lambda **kwargs: ObjectLikeDict(
+                self.custom_objects.list_cluster_custom_object(
+                    group="core.strimzi.io",
+                    version="v1beta2",
+                    plural="strimzipodsets",
+                    **kwargs,
+                )
+            ),
+            namespaced_request=lambda **kwargs: ObjectLikeDict(
+                self.custom_objects.list_namespaced_custom_object(
+                    group="core.strimzi.io",
+                    version="v1beta2",
+                    plural="strimzipodsets",
+                    **kwargs,
+                )
+            ),
+            extract_containers=lambda item: item.spec.pods[0].spec.containers,
+        )
+
     def _list_deploymentconfig(self) -> list[K8sObjectData]:
         # NOTE: Using custom objects API returns dicts, but all other APIs return objects
         # We need to handle this difference using a small wrapper
@@ -353,17 +535,56 @@ class ClusterLoader:
             extract_containers=lambda item: item.spec.template.spec.containers,
         )
 
-    def _list_all_jobs(self) -> list[K8sObjectData]:
-        return self._list_scannable_objects(
-            kind="Job",
-            all_namespaces_request=self.batch.list_job_for_all_namespaces,
-            namespaced_request=self.batch.list_namespaced_job,
-            extract_containers=lambda item: item.spec.template.spec.containers,
-            # NOTE: If the job has ownerReference and it is a CronJob, then we should skip it
-            filter_workflows=lambda item: not any(
-                owner.kind == "CronJob" for owner in item.metadata.owner_references or []
-            ),
-        )
+    async def _list_all_jobs(self) -> list[K8sObjectData]:
+        """List all jobs using batched loading with 500 batch size."""
+        if not self._should_list_resource("Job"):
+            return []
+
+        namespaces = self.namespaces if self.namespaces != "*" else ["*"]
+        all_jobs = []
+        try:
+            batch_count = 0
+            for namespace in namespaces:
+                continue_ref: Optional[str] = None
+                while batch_count < settings.discovery_job_max_batches:
+                    jobs_batch, next_continue_ref = await self._list_namespaced_or_global_objects_batched(
+                        kind="Job",
+                        all_namespaces_request=self.batch.list_job_for_all_namespaces,
+                        namespaced_request=self.batch.list_namespaced_job,
+                        namespace=namespace,
+                        limit=settings.discovery_job_batch_size,
+                        continue_ref=continue_ref,
+                    )
+                    continue_ref = next_continue_ref
+
+                    if not jobs_batch and continue_ref:
+                        # refreshed continue token, count error batches
+                        batch_count += 1
+                        continue
+                    if not jobs_batch:
+                        # no more jobs to batch do not count empty batches
+                        break
+
+                    batch_count += 1
+                    for job in jobs_batch:
+                        if self._is_job_owned_by_cronjob(job):
+                            continue
+                        if self._is_job_grouped(job):
+                            continue
+                        for container in job.spec.template.spec.containers:
+                            all_jobs.append(self.__build_scannable_object(job, container, "Job"))
+                    if not continue_ref:
+                        break
+
+            logger.debug("Found %d regular jobs", len(all_jobs))
+            return all_jobs
+
+        except Exception as e:
+            logger.error(
+                "Failed to run jobs discovery",
+                exc_info=True,
+            )
+            return all_jobs
 
     def _list_all_cronjobs(self) -> list[K8sObjectData]:
         return self._list_scannable_objects(
@@ -372,6 +593,116 @@ class ClusterLoader:
             namespaced_request=self.batch.list_namespaced_cron_job,
             extract_containers=lambda item: item.spec.job_template.spec.template.spec.containers,
         )
+
+    async def _list_all_groupedjobs(self) -> list[K8sObjectData]:
+        """List all GroupedJob objects by grouping jobs with the specified labels."""
+        if not settings.job_grouping_labels:
+            logger.debug("No job grouping labels configured, skipping GroupedJob listing")
+            return []
+
+        if not self._should_list_resource("GroupedJob"):
+            logger.debug("Skipping GroupedJob in cluster")
+            return []
+
+        logger.debug("Listing GroupedJobs with grouping labels: %s", settings.job_grouping_labels)
+
+        grouped_jobs = defaultdict(list)
+        grouped_jobs_template = {}  # Store only ONE full job as template per group - needed for class K8sObjectData
+        continue_ref: Optional[str] = None
+        batch_count = 0
+        namespaces = self.namespaces if self.namespaces != "*" else ["*"]
+        try:
+            batch_count = 0
+            for namespace in namespaces:
+                continue_ref = None
+                while batch_count < settings.discovery_job_max_batches:
+                    jobs_batch, next_continue_ref = await self._list_namespaced_or_global_objects_batched(
+                        kind="Job",
+                        all_namespaces_request=self.batch.list_job_for_all_namespaces,
+                        namespaced_request=self.batch.list_namespaced_job,
+                        namespace=namespace,
+                        limit=settings.discovery_job_batch_size,
+                        continue_ref=continue_ref,
+                    )
+
+                    continue_ref = next_continue_ref
+
+                    if not jobs_batch and continue_ref:
+                        # refreshed continue token, count error batches
+                        batch_count += 1
+                        continue
+                    if not jobs_batch:
+                        # no more jobs to batch do not count empty batches
+                        break
+
+                    batch_count += 1
+                    for job in jobs_batch:
+                        if (
+                            not job.metadata.labels
+                            or self._is_job_owned_by_cronjob(job)
+                            or not self._is_job_grouped(job)
+                        ):
+                            continue
+                        for label_name in settings.job_grouping_labels:
+                            if label_name not in job.metadata.labels:
+                                continue
+                            # label_name is value of grouped job label
+                            label_value = job.metadata.labels[label_name]
+                            group_key = f"{label_name}={label_value}"
+                            lightweight_job = LightweightJobInfo(
+                                name=job.metadata.name, namespace=job.metadata.namespace
+                            )
+                            # Store lightweight job info only for grouped jobs
+                            grouped_jobs[group_key].append(lightweight_job)
+                            # Keep only ONE full job as template per group
+                            if group_key not in grouped_jobs_template:
+                                grouped_jobs_template[group_key] = job
+                    if not continue_ref:
+                        break
+
+        except Exception as e:
+            logger.error(
+                "Failed to run grouped jobs discovery",
+                exc_info=True,
+            )
+            raise
+
+        result = []
+        for group_name, jobs in grouped_jobs.items():
+            template_job = grouped_jobs_template[group_name]
+
+            jobs_by_namespace = defaultdict(list)
+            for job in jobs:
+                jobs_by_namespace[job.namespace].append(job)
+
+            for namespace, namespace_jobs in jobs_by_namespace.items():
+                limited_jobs = namespace_jobs[: settings.job_grouping_limit]
+
+                container_names = set()
+                for container in template_job.spec.template.spec.containers:
+                    container_names.add(container.name)
+
+                for container_name in container_names:
+                    template_container = None
+                    for container in template_job.spec.template.spec.containers:
+                        if container.name == container_name:
+                            template_container = container
+                            break
+
+                    if template_container:
+                        grouped_job = self.__build_scannable_object(
+                            item=template_job, container=template_container, kind="GroupedJob"
+                        )
+
+                        grouped_job.name = group_name
+                        grouped_job.namespace = namespace
+                        grouped_job._api_resource._grouped_jobs = limited_jobs
+                        grouped_job._api_resource._label_filter = group_name
+
+                        result.append(grouped_job)
+
+        logger.debug("Found %d GroupedJob groups", len(result))
+        return result
 
     async def __list_hpa_v1(self) -> dict[HPAKey, HPAData]:
         loop = asyncio.get_running_loop()
@@ -405,6 +736,7 @@ class ClusterLoader:
             all_namespaces_request=self.autoscaling_v2.list_horizontal_pod_autoscaler_for_all_namespaces,
             namespaced_request=self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler,
         )
+
         def __get_metric(hpa: V2HorizontalPodAutoscaler, metric_name: str) -> Optional[float]:
             return next(
                 (
@@ -414,6 +746,7 @@ class ClusterLoader:
                 ),
                 None,
             )
+
         return {
             (
                 hpa.metadata.namespace,
@@ -527,7 +860,7 @@ class KubernetesLoader:
         if self.cluster_loaders == {}:
             logger.error("Could not load any cluster.")
             return
-        
+
         return [
             object
             for cluster_loader in self.cluster_loaders.values()

@@ -12,16 +12,13 @@
 ![Product Name Screen Shot][product-screenshot]
 
 <div align="center">
-  <h1 align="center">Kubernetes Resource Recommendations Based on Historical Data</h1>
-  <h2 align="center">Get recommendations based on your existing data in Prometheus/Coralogix/Thanos/Mimir and more!</h2>
+  <h2 align="center">Get Kubernetes Resource Recommendations based on your existing data in Prometheus/Coralogix/Thanos/Mimir and more!</h2>
   <p align="center">    
     <a href="#installation"><strong>Installation</strong></a>
     .
     <a href="#how-krr-works"><strong>How KRR works</strong></a>
     .
-    <a href="#slack-integration"><strong>Slack Integration</strong></a>
-    .
-    <a href="#free-krr-ui-on-robusta-saas"><strong>Free KRR UI</strong></a>
+    <a href="#krr-ui-on-robusta-saas"><strong>KRR UI</strong></a>
     <br />
     <a href="#usage">Usage</a>
     ·
@@ -30,7 +27,6 @@
     <a href="https://github.com/robusta-dev/krr/issues">Request Feature</a>
     ·
     <a href="#support">Support</a>
-    <br /> Like KRR? Please ⭐ this repository to show your support! 
   </p>
 </div>
 <!-- TABLE OF CONTENTS -->
@@ -64,6 +60,10 @@
 
 Robusta KRR (Kubernetes Resource Recommender) is a CLI tool for **optimizing resource allocation** in Kubernetes clusters. It gathers pod usage data from Prometheus and **recommends requests and limits** for CPU and memory. This **reduces costs and improves performance**.
 
+### Auto-Apply Mode
+
+Put right-sizing on auto-pilot by applying recommendations automatically. See the [KRR Enforcer docs](https://github.com/robusta-dev/krr/tree/main/enforcer).
+
 ### Data Integrations
 
 [![Used to send data to KRR](./images/krr-datasources.svg)](#data-source-integrations)
@@ -77,15 +77,16 @@ _View Instructions for: [Prometheus](#prometheus-victoria-metrics-and-thanos-aut
 
 [![Used to receive information from KRR](./images/krr-other-integrations.svg)](#integrations)
 
-_View instructions for: [Seeing recommendations in a UI](#free-ui-for-krr-recommendations), [Sending recommendations to Slack](#slack-notification), [Setting up KRR as a k9s plugin](#k9s-plugin)_
+_View instructions for: [Seeing recommendations in a UI](#ui-for-krr-recommendations), [Sending recommendations to Slack](#slack-notification), [Setting up KRR as a k9s plugin](#k9s-plugin), [Azure Blob Storage Export with Teams Notification](#azure-blob-teams-integration)_
 
 ### Features
 
-- **No Agent Required**: Run a CLI tool on your local machine for immediate results. (Or run in-cluster for weekly [Slack reports](#slack-integration).)
+- **No Agent Required**: Run a CLI tool on your local machine for immediate results. (Or run in-cluster for weekly [Slack reports](#slack-notification).)
 - **Prometheus Integration**: Get recommendations based on the data you already have
-- **Explainability**: [Understand how recommendations were calculated with explanation graphs](#free-krr-ui-on-robusta-saas)
+- **Explainability**: [Understand how recommendations were calculated with explanation graphs](#krr-ui-on-robusta-saas)
 - **Extensible Strategies**: Easily create and use your own strategies for calculating resource recommendations.
-- **Free SaaS Platform**: See why KRR recommends what it does, by using the [free Robusta SaaS platform](https://platform.robusta.dev/signup/?utm_source=github&utm_medium=krr-readme).
+- **SaaS Platform**: See why KRR recommends what it does, by using the [Robusta SaaS platform](https://platform.robusta.dev/signup/?benefits=krr&utm_source=github&utm_medium=krr-readme&utm_content=features-saas-platform).
+- **Agentic Cost Savings**: Go beyond KRR's rule-based recommendations with [HolmesGPT](#krr-ui-on-robusta-saas) — an AI agent that investigates your cluster to find and fix cost-saving opportunities, and generates fixes for KRR's recommendations.
 - **Future Support**: Upcoming versions will support custom resources (e.g. GPUs) and custom metrics.
 
 ### How Much Can I Expect to Save with KRR?
@@ -107,9 +108,9 @@ Read more about [how KRR works](#how-krr-works)
 | Installation Location 🌍    | ✅ Not required to be installed inside the cluster, can be used on your own device, connected to a cluster | ❌ Must be installed inside the cluster                     |
 | Workload Configuration 🔧   | ✅ No need to configure a VPA object for each workload                                                     | ❌ Requires VPA object configuration for each workload      |
 | Immediate Results ⚡         | ✅ Gets results immediately (given Prometheus is running)                                                  | ❌ Requires time to gather data and provide recommendations |
-| Reporting 📊                | ✅ Json, CSV, Markdown, [Web UI](#free-ui-for-krr-recommendations), and more!                              | ❌ Not supported                                            |
+| Reporting 📊                | ✅ Json, CSV, Markdown, [Web UI](#ui-for-krr-recommendations), and more!                                   | ❌ Not supported                                            |
 | Extensibility 🔧            | ✅ Add your own strategies with few lines of Python                                                        | :warning: Limited extensibility                             |
-| Explainability 📖           | ✅ [See graphs explaining the recommendations](#free-krr-ui-on-robusta-saas)                               | ❌ Not supported                                            |
+| Explainability 📖           | ✅ [See graphs explaining the recommendations](#krr-ui-on-robusta-saas)                                    | ❌ Not supported                                            |
 | Custom Metrics 📏           | 🔄 Support in future versions                                                                              | ❌ Not supported                                            |
 | Custom Resources 🎛️         | 🔄 Support in future versions (e.g., GPU)                                                                  | ❌ Not supported                                            |
 | Autoscaling 🔀              | 🔄 Support in future versions                                                                              | ✅ Automatic application of recommendations                 |
@@ -119,7 +120,7 @@ Read more about [how KRR works](#how-krr-works)
 
 <!-- GETTING STARTED -->
 
-## Installation 
+## Installation
 
 ### Requirements
 
@@ -130,7 +131,7 @@ KRR requires Prometheus 2.26+, [kube-state-metrics](https://github.com/kubernete
 No setup is required if you use kube-prometheus-stack or <a href="https://docs.robusta.dev/master/configuration/alertmanager-integration/embedded-prometheus.html">Robusta's Embedded Prometheus</a>.
 
 If you have a different setup, make sure the following metrics exist:
-  
+
 - `container_cpu_usage_seconds_total`
 - `container_memory_working_set_bytes`
 - `kube_replicaset_owner`
@@ -178,8 +179,8 @@ You can install using brew (see above) on [WSL2](https://docs.brew.sh/Homebrew-o
 </details>
 
 <details>
-  <summary>Airgapped Installation (Offline Environments)</summary>
-  
+  <summary>Docker image, binaries, and airgapped installation (offline environments)</summary>
+
 You can download pre-built binaries from <a href="https://github.com/robusta-dev/krr/releases">Releases</a> or use the prebuilt Docker container. For example, the container for version 1.8.3 is:
 
 ```
@@ -188,6 +189,28 @@ us-central1-docker.pkg.dev/genuine-flight-317411/devel/krr:v1.8.3
 
 We do **not** recommend installing KRR from source in airgapped environments due to the headache of installing Python dependencies. Use one of the above methods instead and contact us (via Slack, GitHub issues, or email) if you need assistance.
 </details>
+
+<details>
+  <summary>In-Cluster</summary>
+
+Apart from running KRR as a CLI tool you can also run KRR inside your cluster. We suggest installing KRR via the <a href="https://platform.robusta.dev/signup/?benefits=krr&utm_source=github&utm_medium=krr-readme&utm_content=in-cluster-robusta-platform">Robusta Platform</a>
+. It gives you a <a href="https://platform.robusta.dev/signup/?benefits=krr&utm_source=github&utm_medium=krr-readme&utm_content=in-cluster-ui">UI</a> with some features like the following
+* View application usage history graphs on which recommendations are based.
+* Get application, namespace and cluster level recommendations.
+* YAML configuration to apply the suggested recommendation and more
+
+<img src="./images/ui_screenshot_new.png">
+
+<img src="./images/ui_recommendation.png">
+
+You can also run KRR in-cluster as a Kubernetes Job, if you don't want to view results easily in a <a href="https://platform.robusta.dev/signup/?benefits=krr&utm_source=github&utm_medium=krr-readme&utm_content=in-cluster-ui">UI</a>. 
+
+```
+kubectl apply -f https://raw.githubusercontent.com/robusta-dev/krr/refs/heads/main/docs/krr-in-cluster/krr-in-cluster-job.yaml
+
+```
+</details>
+
 
 <details>
   <summary>From Source</summary>
@@ -219,7 +242,7 @@ All above examples show running command as `krr ...`, replace it with `python kr
 
 ### Additional Options
 
-- [View KRR Reports in a Web UI](#free-ui-for-krr-recommendations)
+- [View KRR Reports in a Web UI](#ui-for-krr-recommendations)
 - [Receive KRR Reports Weekly in Slack](#slack-notification)
 
 ### Environment-Specific Instructions
@@ -238,18 +261,20 @@ Setup KRR for...
 
 If your llm provider url uses a certificate from a custom CA, in order to trust it, base-64 encode the certificate, and store it in an environment variable named ``CERTIFICATE``
 
-## Free KRR UI on Robusta SaaS
+## KRR UI on Robusta SaaS
 
-We highly recommend using the [free Robusta SaaS platform](https://platform.robusta.dev/signup/?utm_source=github&utm_medium=krr-readme). You can:
+We highly recommend using the [Robusta SaaS platform](https://platform.robusta.dev/signup/?benefits=krr&utm_source=github&utm_medium=krr-readme&utm_content=krr-ui-robusta-saas-platform). You can:
 
 - Understand individual app recommendations with app usage history
 - Sort and filter recommendations by namespace, priority, and more
 - Give devs a YAML snippet to fix the problems KRR finds
-- Analyze impact using KRR scan history
+- Automatically generate fixes for KRR recommendations using AI and HolmesGPT
 
-  <a href="https://www.loom.com/share/49ea188f67c545f0ae98508b448d1a8b">
-      <img src="https://cdn.loom.com/sessions/thumbnails/49ea188f67c545f0ae98508b448d1a8b-with-play.gif">
-  </a>
+KRR right-sizes your workloads using predetermined strategies. To uncover cost-saving opportunities that go beyond fixed rules, the platform pairs KRR with [HolmesGPT](https://github.com/robusta-dev/holmesgpt) — an AI agent that investigates your clusters and reasons about where you're overspending, instead of relying on hardcoded rules. Let it find and fix cost-saving opportunities for you.
+
+<p align="center">
+  <img src="./images/krr-create-pr.png" alt="Create PR with AI-generated fix for KRR recommendation" width="450">
+</p>
 
 <!-- USAGE EXAMPLES -->
 
@@ -258,7 +283,7 @@ We highly recommend using the [free Robusta SaaS platform](https://platform.robu
 
 <details>
   <summary>Basic usage</summary>
-  
+
 ```sh
 krr simple
 ```
@@ -266,7 +291,7 @@ krr simple
 
 <details>
   <summary>Tweak the recommendation algorithm (strategy)</summary>
-  
+
 Most helpful flags:
 
 - `--cpu-min` Sets the minimum recommended cpu value in millicores
@@ -307,6 +332,12 @@ List as many namespaces as you want with `-n` (in this case, `default` and `ingr
 krr simple -n default -n ingress-nginx
 ```
 
+The -n flag also supports regex matches like -n kube-.*. To use regexes, you must have permissions to list namespaces in the target cluster.
+
+```sh
+krr simple -n default -n 'ingress-.*'
+```
+
 See [example ServiceAccount and RBAC permissions](./tests/single_namespace_permissions.yaml)
 </details>
 
@@ -318,6 +349,43 @@ Use a <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects
 ```sh
 python krr.py simple --selector 'app.kubernetes.io/instance in (robusta, ingress-nginx)'
 ```
+</details>
+
+<details>
+  <summary>Group jobs by specific labels</summary>
+
+Group jobs that have specific labels into GroupedJob objects for consolidated resource recommendations. This is useful for batch jobs, data processing pipelines, or any workload where you want to analyze resource usage across multiple related jobs.
+
+```sh
+krr simple --job-grouping-labels app,team
+```
+
+This will:
+- Group jobs that have either `app` or `team` labels (or both)
+- Create GroupedJob objects with names like `app=frontend`, `team=backend`, etc.
+- Provide resource recommendations for the entire group instead of individual jobs
+- Jobs with the specified labels will be excluded from regular Job listing
+
+You can specify multiple labels separated by commas:
+
+```sh
+krr simple --job-grouping-labels app,team,environment
+```
+
+Each job will be grouped by each label it has, so a job with `app=api,team=backend` will appear in both `app=api` and `team=backend` groups.
+
+### Limiting how many jobs are included per group
+
+Use `--job-grouping-limit <N>` to cap how many jobs are included **per group** (useful when there are many historical jobs).
+
+```sh
+krr simple --job-grouping-labels app,team --job-grouping-limit 3
+```
+
+* Each label group will include at most **N** jobs (e.g., the first 3 returned by the API).
+* Other matching jobs beyond the limit are ignored for that group.
+* If not specified, the default limit is **500** jobs per group.
+
 </details>
 
 <details>
@@ -341,6 +409,8 @@ Currently KRR ships with a few formatters to represent the scan data:
 - `yaml`
 - `pprint` - data representation from python's pprint library
 - `csv` - export data to a csv file in the current directory
+- `csv-raw` - csv with raw data for calculation
+- `html`
 
 To run a strategy with a selected formatter, add a `-f` flag. Usually this should be combined with `--fileoutput <filename>` to write clean output to file without logs:
 
@@ -403,7 +473,7 @@ Robusta KRR uses the following Prometheus queries to gather usage data:
 
 [_Need to customize the metrics? Tell us and we'll add support._](https://github.com/robusta-dev/krr/issues/new)
 
-Get a free breakdown of KRR recommendations in the [Robusta SaaS](#free-krr-ui-on-robusta-saas).
+Get a breakdown of KRR recommendations in the [Robusta SaaS](#krr-ui-on-robusta-saas).
 
 ### Algorithm
 
@@ -583,19 +653,17 @@ For discovering Prometheus it scans services for those labels:
 
 ## Integrations
 
-<details id="free-ui-for-krr-recommendations">
-<summary>Free UI for KRR recommendations</summary>
+<details id="ui-for-krr-recommendations">
+<summary>UI for KRR recommendations</summary>
 
-We highly recommend using the [free Robusta SaaS platform](https://platform.robusta.dev/signup/?utm_source=github&utm_medium=krr-readme). You can:
+We highly recommend using the [Robusta SaaS platform](https://platform.robusta.dev/signup/?benefits=krr&utm_source=github&utm_medium=krr-readme&utm_content=integrations-robusta-saas-platform). You can:
 
 - Understand individual app recommendations with app usage history
 - Sort and filter recommendations by namespace, priority, and more
 - Give dev's a YAML snippet to fix the problems KRR finds
-- Analyze impact using KRR scan history
+- Automatically generate fixes for KRR recommendations using AI and HolmesGPT
+- Go beyond KRR's rule-based recommendations with [HolmesGPT](https://github.com/robusta-dev/holmesgpt), an AI agent that investigates your cluster to find and fix cost-saving opportunities
 
-  <a href="https://www.loom.com/share/49ea188f67c545f0ae98508b448d1a8b">
-      <img src="https://cdn.loom.com/sessions/thumbnails/49ea188f67c545f0ae98508b448d1a8b-with-play.gif">
-  </a>
 
 </details>
 
@@ -648,6 +716,84 @@ customPlaybooks:
   Installation instructions: [k9s docs](https://k9scli.io/topics/plugins/)
 </details>
 
+<details id="azure-blob-teams-integration">
+<summary>Azure Blob Storage Export with Microsoft Teams Notifications</summary>
+
+Export KRR reports directly to Azure Blob Storage and get notified in Microsoft Teams when reports are generated.
+
+![Teams Notification Screenshot][teams-screenshot]
+
+### Prerequisites
+
+- An Azure Storage Account with a container for storing reports
+- A Microsoft Teams channel with an incoming webhook configured
+- Azure SAS URL with write permissions to your storage container
+
+### Setup
+
+1. **Create Azure Storage Container**: Set up a container in your Azure Storage Account (e.g., `fileuploads`)
+
+2. **Generate SAS URL**: Create a SAS URL for your container with write permissions:
+   ```bash
+   # Example SAS URL format (replace with your actual values)
+   https://yourstorageaccount.blob.core.windows.net/fileuploads?sv=2024-11-04&ss=bf&srt=o&sp=wactfx&se=2026-07-21T21:12:48Z&st=2025-07-21T12:57:48Z&spr=https&sig=...
+   ```
+
+3. **Configure Teams Webhook**: Set up an incoming webhook in your Microsoft Teams channel (located in the Workflows tab)
+
+4. **Run KRR with Azure Integration**:
+   ```bash
+   krr simple -f html \
+     --azurebloboutput "https://yourstorageaccount.blob.core.windows.net/fileuploads?sv=..." \
+     --teams-webhook "https://your-teams-webhook-url" \
+     --azure-subscription-id "your-subscription-id" \
+     --azure-resource-group "your-resource-group"
+   ```
+
+### Features
+
+- **Automatic File Upload**: Reports are automatically uploaded to Azure Blob Storage with timestamped filenames
+- **Teams Notifications**: Rich adaptive cards are sent to Teams when reports are generated
+- **Direct Links**: Teams notifications include direct links to view files in Azure Portal
+- **Multiple Formats**: Supports all KRR output formats (JSON, CSV, HTML, YAML, etc.)
+- **Secure**: Uses SAS URLs for secure, time-limited access to your storage
+
+### Command Options
+
+| Flag | Description |
+|------|-------------|
+| `--azurebloboutput` | Azure Blob Storage SAS URL base path (make sure you include the container name; filename will be auto-appended) |
+| `--teams-webhook` | Microsoft Teams webhook URL for notifications |
+| `--azure-subscription-id` | Azure Subscription ID (for Azure Portal links in Teams) |
+| `--azure-resource-group` | Azure Resource Group name (for Azure Portal links in Teams) |
+
+### Example Usage
+
+```bash
+# Basic Azure Blob export
+krr simple -f json --azurebloboutput "https://mystorageaccount.blob.core.windows.net/reports?sv=..."
+
+# With Teams notifications
+krr simple -f html \
+  --azurebloboutput "https://mystorageaccount.blob.core.windows.net/reports?sv=..." \
+  --teams-webhook "https://outlook.office.com/webhook/..." \
+  --azure-subscription-id "12345678-1234-1234-1234-123456789012" \
+  --azure-resource-group "my-resource-group"
+```
+
+### Teams Notification Features
+
+The Teams adaptive card includes:
+- 📊 Report generation announcement
+- Namespace and format details  
+- Generation timestamp
+- Storage account and container information
+- Direct "View in Azure Storage" button linking to Azure Portal
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+</details>
+
 ## Creating a Custom Strategy/Formatter
 
 Look into the [examples](https://github.com/robusta-dev/krr/tree/main/examples) directory for examples on how to create a custom strategy/formatter.
@@ -662,7 +808,7 @@ _We use pytest to run tests._
 
 1. Install the project manually (see above)
 2. Navigate to the project root directory
-3. Install poetry (https://python-poetry.org/docs/#installing-with-the-official-installer)
+3. Install [poetry](https://python-poetry.org/docs/#installing-with-the-official-installer)
 4. Install dev dependencies:
 
 ```sh
@@ -712,7 +858,7 @@ Distributed under the MIT License. See [LICENSE.txt](https://github.com/robusta-
 
 ## Support
 
-If you have any questions, feel free to contact **support@robusta.dev** or message us on [robustacommunity.slack.com](https://bit.ly/robusta-slack)
+If you have any questions, contact **support@robusta.dev** or message us on [robustacommunity.slack.com](https://bit.ly/robusta-slack)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -734,3 +880,4 @@ If you have any questions, feel free to contact **support@robusta.dev** or messa
 [product-screenshot]: images/screenshot.jpeg
 [slack-screenshot]: images/krr_slack_example.png
 [ui-screenshot]: images/ui_video.gif
+[teams-screenshot]: images/krr_teams_example.png
