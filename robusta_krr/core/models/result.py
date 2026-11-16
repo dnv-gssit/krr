@@ -86,19 +86,15 @@ class Result(pd.BaseModel):
         return formatter(self)
 
     @staticmethod
-    def __scan_cost(scan: ResourceScan) -> float:
-
+    def __scan_cost(scan: ResourceScan) -> Optional[float]:
         severity = scan.recommended.requests[ResourceType.Memory].severity
-        if severity == Severity.CRITICAL:
-            return 1.0
-        elif severity == Severity.WARNING:
-            return 0.7
-        elif severity == Severity.OK:
-            return 0.3
-        elif severity == Severity.GOOD:
-            return 0.0
-        else:
-            return 0
+        # None means unassessed (e.g. UNKNOWN), excluded from the score
+        return {
+            Severity.GOOD: 0.0,
+            Severity.OK: 0.3,
+            Severity.WARNING: 0.7,
+            Severity.CRITICAL: 1.0,
+        }.get(severity)
 
     def __calculate_score(self) -> int:
         """Get the score of the result.
@@ -106,12 +102,10 @@ class Result(pd.BaseModel):
         Returns:
             The score of the result.
         """
-        score = sum(self.__scan_cost(scan) for scan in self.scans)
-        if self.scans:
-            normalized_score =  100 - (score / len(self.scans)) * 100
-            return int(normalized_score)
-        else:
+        costs = [cost for cost in (self.__scan_cost(scan) for scan in self.scans) if cost is not None]
+        if not costs:
             return 100
+        return int(100 - (sum(costs) / len(costs)) * 100)
 
     @property
     def score_letter(self) -> str:
